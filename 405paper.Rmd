@@ -1,0 +1,494 @@
+---
+title: "EC405 Paper"
+author: "Reetom Gangopadhyay"
+date: "2023-10-24"
+output: pdf_document
+---
+
+```{r csv}
+
+data <- read.csv('unemployment.csv')
+
+data$DATE <- as.Date(data$DATE)
+
+# Subset the data to include only the period from January 2010 onwards
+data_2000 <- data[data$DATE >= as.Date("2000-01-01"), ]
+
+# data_2000
+
+```
+
+
+
+
+
+```{r ts}
+library(forecast)
+
+plot.ts(data$UNRATENSA, main = "Data from January 1948", ylab = "Unemployment rate",xlab="Time (Months since January 1948)")
+
+plot.ts(data_2000$UNRATENSA, main = "Data from January 2000 onward",ylab = "Unemployment rate",xlab="Time (Months since January 2000)")
+
+# mod <- auto.arima(data$UNRATENSA)
+
+# set.seed(123) 
+# model <- arima.sim(n = 100, list(order = c(5,1,1), ar = c(0.2, -0.3, 0.4, -0.1, 0.2), ma = 0.5))
+
+# Plot the simulated ARIMA(5,1,1) model
+# lines(model, col = "red")
+
+```
+
+```{r acf}
+acf_result <- acf(data_2000$UNRATENSA, lag.max = 50)
+plot(acf_result, main = "Autocorrelation Function for Unemployment Rate Variable")
+pacf_result <- pacf(data_2000$UNRATENSA, lag.max = 50)
+plot(pacf_result,main = "Partial Autocorrelation Function for Unemployment Rate Variable")
+
+```
+
+
+```{r diff}
+
+diff_acf <- acf(diff(data_2000$UNRATENSA), lag.max = 50)
+diff_pacf <- pacf(diff(data_2000$UNRATENSA), lag.max = 50)
+
+
+plot(diff_acf, main = "Differenced Autocorrelation Function")
+
+plot(diff_pacf,main = "Differenced Partial Autocorrelation Function")
+
+```
+
+
+```{r arima}
+
+fit <- auto.arima(data_2000$UNRATENSA)
+fullfit <- auto.arima(data$UNRATENSA)
+
+summary(fit)
+
+tsdiag(fit)
+
+
+
+
+```
+
+```{r tstat}
+
+cat("\nar1:",0.5773/0.1818)
+cat("\nma1:",0.5578/0.1856)
+cat("\nma2",0.1778/0.0682)
+
+```
+
+
+```{r ljung box}
+
+Box.test(residuals(fit), lag = 20, type = "Ljung")
+
+```
+
+
+```{r adf, warnings=FALSE}
+library(tseries)
+adf.test(data_2000$UNRATENSA)
+
+```
+
+Dataset contains 2 things: date and % unemployed from FRED.
+
+
+
+
+```{r kpss}
+
+kpss_result <- kpss.test(data_2000$UNRATENSA)
+
+
+kpss_result
+
+```
+
+
+```{r pp}
+
+pp_result <- pp.test(data_2000$UNRATENSA)
+
+pp_result
+
+
+```
+
+
+```{r forecast}
+
+train <- data_2000[1:273, "UNRATENSA"]
+test <- data_2000[274:285,"UNRATENSA"]
+
+library(forecast)
+
+holt_2000 <- HoltWinters(data_2000$UNRATENSA,gamma = F)
+forecast_2000 <- forecast(holt_2000,h=12)
+#plot(forecast_2000)
+
+
+
+train_holt <- HoltWinters(train,gamma=F)
+forecast_train <- forecast(train_holt,h=12)
+plot(forecast_train)
+
+HWerr = test-forecast_train$mean
+HWrmse = sqrt(mean(HWerr^2))
+HWmae = mean(abs(HWerr))
+HWmape = mean(abs((HWerr*100)/test))
+
+
+cat("Errors: ",HWerr)
+cat("\nMAE: ",HWmae)
+cat("\nMAPE: ",HWmape)
+cat("\nRMSE: ",HWrmse)
+
+forecast_train
+
+```
+
+
+```{r ARIMA}
+
+auto.arima(train)
+
+train_fit <- arima(data_2000$UNRATENSA,order = c(1,1,2))
+train_cast <- forecast(fit,h=12)
+
+train_cast
+
+plot(train_cast)
+
+err = test-train_cast$mean
+rmse = sqrt(mean(err^2))
+mae = mean(abs(err))
+mape = mean(abs((err*100)/test))
+
+
+cat("\nErrors: ",err)
+cat("\nMAE: ",mae)
+cat("\nMAPE: ",mape)
+cat("\nRMSE: ",rmse)
+
+
+```
+
+ARIMA is better forecast
+
+```{r GARCH}
+
+par(mfrow = c(2,2))
+acf(abs(train_fit$residuals))
+pacf(abs(train_fit$residuals))
+acf(train_fit$residuals^2)
+pacf(train_fit$residuals^2)
+
+library(fGarch)
+
+fitgr = garchFit(formula ~ arma(1,2) + garch(1,1),data = diff(train), trace = F)
+
+# plot(fitgr)
+
+pred_garch <- predict(fitgr,n.ahead=12,plot=T)
+
+print(pred_garch)
+fitgr
+
+```
+
+Lack of significance on lags so don't fit GARCH
+
+
+
+```{r }
+
+library(rugarch)
+library(forecast)
+
+combined_model_spec <- ugarchspec(mean.model = list(armaOrder = c(1, 1, 2)), variance.model = list(garchOrder = c(1, 1)), distribution.model = "std")
+
+combined_model <- ugarchfit(spec = combined_model_spec, data = train)
+
+garchcast <- ugarchforecast(combined_model, n.ahead = 12,data=train)
+
+forecasted_std_dev <- sigma(garchcast)
+
+# Calculate the error between the actual and forecasted values
+err <- test - forecasted_std_dev
+
+# Calculate RMSE
+rmse <- sqrt(mean(err^2))
+
+# Calculate MAE
+mae <- mean(abs(err))
+
+# Calculate MAPE
+mape <- mean(abs((err * 100) / test))
+
+print(err)
+cat("\nmae:",mae)
+cat("\nmape:",mape)
+cat("\nrmse:",rmse)
+
+
+
+
+# plot(garchcast)
+```
+
+
+
+```{r seasonal}
+
+freqData <- ts(data$UNRATENSA,frequency = 12)
+
+season_fit <- auto.arima(freqData)
+
+plot.ts(freqData)
+
+print(season_fit)
+
+```
+
+```{r pars}
+
+cat("\nar1:",0.8428/0.0522)
+cat("\nma1:",0.9140/0.0392)
+cat("\nsar1",0.3243/0.0321)
+cat("\nsar2",0.3047/0.0317)
+
+```
+
+
+
+```{r spec}
+
+spec_result <- spec.pgram(data_2000$UNRATENSA, taper = 0, log = "no", span =c(3,5))
+
+plot(spec_result, main = "Spectral Density Plot")
+
+```
+
+
+
+FORECAST SEASON
+```{r foreSea}
+
+train_fit_s <- arima(freqData,order = c(1,1,1),seasonal = list(order = c(2,0,0), frequency = 12))
+train_cast_s <- forecast(season_fit,h=12)
+
+train_cast_s
+
+plot(train_cast_s)
+
+
+errs = test-train_cast_s$mean
+rmses = sqrt(mean(errs^2))
+maes = mean(abs(errs))
+mapes = mean(abs((errs*100)/test))
+
+
+cat("\nErrors: ",errs)
+cat("\nMAE: ",maes)
+cat("\nMAPE: ",mapes)
+cat("\nRMSE: ",rmses)
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+///break
+```{r zandrews}
+library(urca)
+
+za <- ur.za(data_2000$UNRATENSA, model = c("intercept", "trend", "both"), lag=NULL)
+
+summary(za)
+
+```
+
+
+```{r garcheff}
+
+Box.test((residuals(fit))^2, lag = 20, type = "Ljung")
+
+plot((residuals(fit))^2)
+```
+
+
+
+
+
+```{r test}
+
+library(TSA)
+
+break.model=arimax(data_2000$UNRATENSA,order=c(1,1,2),
+                   xtransf = data.frame(br=1*(seq(data_2000$UNRATENSA) == 244),
+                                        br=1*(seq(data_2000$UNRATENSA) == 245),
+                                        br=1*(seq(data_2000$UNRATENSA) == 246),
+                                        br=1*(seq(data_2000$UNRATENSA) == 247)), 
+                    transfer=list(c(0,0),c(0,0),c(0,0),c(0,0)))
+
+break.model
+
+tsdiag(break.model)
+
+
+# Calculate residuals
+residuals_squared <- residuals(break.model)^2
+
+# Create a vector for x values
+x_values <- seq_along(residuals_squared)
+
+# Plot squared residuals starting from x = 230 with x-axis spacing by 1
+plot(x_values[230:length(x_values)], residuals_squared[230:length(x_values)], 
+     type = 'l',  # 'l' for line plot
+     xlab = 'Observation Number', 
+     ylab = 'Squared Residuals',
+     main = 'Squared Residuals Plot starting from x = 230',
+     xaxt = 'n')  # 'n' to suppress x-axis
+
+# Add custom x-axis with spacing by 1
+axis(1, at = seq(230, length(x_values), by = 1), labels = seq(230, length(x_values), by = 1))
+
+```
+
+```{r tstatstr}
+cat("\nar1:",0.4908/0.1750)
+cat("\nma1:",0.3092/0.1674)
+cat("\nma2:",0.1957/0.0515)
+cat("\nbr-MA0",9.054/0.3322)
+cat("\nbr.1-MA0",6.8984/0.4570)
+cat("\nbr.2-MA0",4.2985/0.4647)
+cat("\nbr.3-MA0",2.6777/0.3410)
+
+```
+
+
+
+```{r seasStr}
+
+library(TSA)
+
+sbreak.model=arimax(data_2000$UNRATENSA,order=c(1,1,1), seasonal = list(order = c(9,0,9), frequency = 12),
+                   xtransf = data.frame(br=1*(seq(data_2000$UNRATENSA) == 244),
+                                        br=1*(seq(data_2000$UNRATENSA) == 245),
+                                        br=1*(seq(data_2000$UNRATENSA) == 246),
+                                        br=1*(seq(data_2000$UNRATENSA) == 247)), 
+                    transfer=list(c(0,0),c(0,0),c(0,0),c(0,0)))
+
+sbreak.model
+
+tsdiag(sbreak.model)
+
+
+# Calculate residuals
+sresiduals_squared <- residuals(sbreak.model)^2
+
+# Create a vector for x values
+x_valuess <- seq_along(sresiduals_squared)
+
+# Plot squared residuals starting from x = 230 with x-axis spacing by 1
+plot(x_valuess[230:length(x_valuess)], sresiduals_squared[230:length(x_valuess)], 
+     type = 'l',  # 'l' for line plot
+     xlab = 'Observation Number', 
+     ylab = 'Squared Residuals',
+     main = 'Squared Residuals Plot starting from x = 230',
+     xaxt = 'n')  # 'n' to suppress x-axis
+
+# Add custom x-axis with spacing by 1
+axis(1, at = seq(230, length(x_valuess), by = 1), labels = seq(230, length(x_valuess), by = 1))
+
+```
+
+
+```{r br}
+
+cat("\nar1:",0.7627/0.1037)
+cat("\nma1:",0.4603/0.1147)
+
+cat("\nsar1:",0.2194/0.0479)
+cat("\nsar2:",0.4311/0.0354)
+cat("\nsar3:",0.4743/0.0147)
+cat("\nsar4:",0.6969/0.0363)
+cat("\nsar5:",0.7292/0.0046)
+cat("\nsar6:",0.4304/0.0346)
+cat("\nsar7:",0.4761/0.0110)
+cat("\nsar8:",0.6969/0.0363)
+cat("\nsar9:",0.9546/0.0464)
+cat("\nsma1:",0.2173/0.0684)
+cat("\nsma2:",0.4497/0.0406)
+cat("\nsma3:",0.4473/0.0429)
+cat("\nsma4:",0.7146/0.0539)
+cat("\nsma5:",0.7464/0.00654)
+cat("\nsma6:",0.4304/0.0521)
+cat("\nsma7:",0.4807/0.0442)
+cat("\nsma8:",0.2250/0.0548)
+cat("\nsma9:",0.9562/0.0644)
+
+
+cat("\nbr-MA0",9.5445/0.1778)
+cat("\nbr.1-MA0",7.0245/0.237)
+cat("\nbr.2-MA0",3.8486/2.4218)
+cat("\nbr.3-MA0",2.4218/0.1821)
+
+
+
+```
+```{r forecSEASONBR}
+
+### STBREAK AND SARIMA 
+transA=c(rep(0,243),9.0594,6.8984,4.2985,2.6766,rep(0,50))
+
+library(forecast) 
+
+sbrarima=Arima(data_2000$UNRATENSA,order=c(1,1,1), seasonal = list(order = c(9,0,9), frequency = 12),xreg=transA[1:285])
+
+sbrfc <- forecast(sbrarima, h = 12, xreg=transA[286:297]) 
+
+plot(sbrfc)
+
+sbrfc
+
+
+
+```
+
+
+```{r forec}
+
+trans=c(rep(0,243),9.0594,6.8984,4.2985,2.6766,rep(0,50))
+
+library(forecast) 
+
+brarima=Arima(data_2000$UNRATENSA,order=c(1,1,2),xreg=trans[1:285])
+
+brfc <- forecast(brarima, h = 12, xreg=trans[286:297]) 
+
+plot(brfc)
+
+brfc
+
+
+```
+
+
+
